@@ -536,7 +536,7 @@ main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
     <div class="field"><label>Provider <span class="badge-free" id="freeBadge">100% free</span></label><select id="providerSel" onchange="onProviderChange()"></select><div class="tip" id="providerTip"></div></div>
     <div class="field"><label>Model <button class="secondary small" onclick="loadModels(true)">↻ refresh</button></label><input type="text" id="modelSearch" placeholder="Search models…" oninput="filterModels()" autocomplete="off"><select id="modelSel" size="4" style="margin-top:4px"></select></div>
     <div class="field" id="showAllRow" style="display:none"><label class="toggle-label"><input type="checkbox" id="showAllToggle" onchange="toggleShowAll()"><span>Show all models (not just free)</span></label></div>
-    <div class="field" id="baseRow" style="display:none"><label>Server URL</label><input type="text" id="baseInput" placeholder="http://localhost:20128/v1" autocomplete="off"></div>
+    <div class="field" id="baseRow" style="display:none"><label>Server URL</label><input type="text" id="baseInput" placeholder="http://localhost:20128/v1" autocomplete="off" oninput="updateProviderTip()"></div>
     <div class="field" id="keyRow"><label>API key</label><div class="input-group"><input type="password" id="keyInput" placeholder="Paste your key" autocomplete="off"><button onclick="toggleKeyVis()">👁</button></div><div class="tip" id="keyTip"></div></div>
     <div class="field"><label>System prompt</label><textarea id="sysPrompt" placeholder="How should the assistant behave?"></textarea></div>
     <div class="field"><label>Creativity (temperature) <span id="tempVal">0.7</span></label><input type="range" id="tempRange" min="0" max="2" step="0.1" value="0.7" oninput="$('tempVal').textContent=this.value"></div>
@@ -1685,7 +1685,11 @@ async function populateModels(provKey,force){
     else if(provKey==='anthropic'){
       list=p.fallback;
     }
-    if(list&&list.length){_modelCache[provKey]=list;fill(list)}
+    if(list&&list.length){
+      _modelCache[provKey]=list;
+      fill(list);
+      if(provKey==='ninerouter'){$('toast').classList.add('hidden')}
+    }
   }catch(e){
     console.error("Failed to load models:", e);
     if(provKey === 'ninerouter'){
@@ -1731,15 +1735,20 @@ function openSettings(){
   onProviderChange();$('settingsModal').classList.remove('hidden');
 }
 function closeSettings(){$('settingsModal').classList.add('hidden')}
+function updateProviderTip() {
+  const k = ($('providerSel') ? $('providerSel').value : '') || settings.provider;
+  const p = PROVIDERS[k] || PROVIDERS.pollinations;
+  if (k === 'ninerouter' && isLocal9RouterEndpoint() && !extensionConnected) {
+    $('providerTip').innerHTML = p.tip + '<br><span style="color:var(--danger);font-weight:600">⚠️ Extension not connected. CORS will block local 9Router. Load the extension, OR run serve.js in your terminal (<code>node serve.js</code>) and open <code>http://localhost:3000</code>.</span>';
+  } else {
+    $('providerTip').textContent = p.tip;
+  }
+}
 function onProviderChange(){
   const k=$('providerSel').value || settings.provider, p=PROVIDERS[k] || PROVIDERS.pollinations;
-  if(k==='ninerouter'&&isLocal9RouterEndpoint()&&!extensionConnected){
-    $('providerTip').innerHTML=p.tip+'<br><span style="color:var(--danger);font-weight:600">⚠️ Extension not connected. CORS will block local 9Router. Load the extension, OR run serve.js in your terminal (<code>node serve.js</code>) and open <code>http://localhost:3000</code>.</span>';
-  } else {
-    $('providerTip').textContent=p.tip;
-  }
   $('freeBadge').textContent=p.badge||(p.needsKey?'free key needed':'100% free');
   $('baseRow').style.display=p.customBase?'':'none';if(p.customBase)$('baseInput').value=(settings.bases&&settings.bases[k])||p.defaultBase;
+  updateProviderTip();
   $('showAllRow').style.display=k==='openrouter'?'':'none';if(k==='openrouter')$('showAllToggle').checked=settings.showAllModels;
   if(p.needsKey){$('keyRow').style.display='';$('keyInput').value=settings.keys[p.keyName]||'';$('keyTip').innerHTML=p.keyTip||('Free — <a href="'+p.keyLink+'" target="_blank">get key →</a>')}else{$('keyRow').style.display='none'}
   
