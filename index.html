@@ -1627,6 +1627,11 @@ async function readSSE(res,signal,onData){const reader=res.body.getReader();cons
 
 /* ── Models ── */
 const _modelCache={};
+function isLocal9RouterEndpoint() {
+  const baseInput = $('baseInput');
+  const url = (baseInput ? baseInput.value.trim() : '') || (settings.bases && settings.bases.ninerouter) || PROVIDERS.ninerouter.defaultBase || '';
+  return !url || url.includes('localhost') || url.includes('127.0.0.1');
+}
 async function loadModels(force){await populateModels($('providerSel').value||settings.provider,force)}
 async function populateModels(provKey,force){
   const p=PROVIDERS[provKey],sel=$('modelSel'),chosen=settings.models[provKey]||p.fallback[0];
@@ -1658,15 +1663,8 @@ async function populateModels(provKey,force){
       if(typeof j === 'string'){
         try { j = JSON.parse(j); } catch(err) {}
       }
-      let modelsArray = null;
-      if (Array.isArray(j)) {
-        modelsArray = j;
-      } else if (j && Array.isArray(j.data)) {
-        modelsArray = j.data;
-      }
-      if (modelsArray) {
-        list = modelsArray.map(m => typeof m === 'string' ? m : (m && m.id)).filter(Boolean).sort();
-      }
+      if(j&&Array.isArray(j.data))list=j.data.map(m=>m.id).filter(x=>typeof x==='string');
+      else if(j&&Array.isArray(j))list=j.map(m=>m.id||m).filter(x=>typeof x==='string');
     }
     else if(provKey==='groq'){
       const k=settings.keys.groq||($('keyInput')?$('keyInput').value.trim():'');
@@ -1691,10 +1689,14 @@ async function populateModels(provKey,force){
   }catch(e){
     console.error("Failed to load models:", e);
     if(provKey === 'ninerouter'){
-      if(!extensionConnected){
-        toast('⚠️ Extension not connected. Enable the extension, or run "node serve.js" in the terminal to serve the app locally and bypass CORS.', true, true);
+      if(isLocal9RouterEndpoint()){
+        if(!extensionConnected){
+          toast('⚠️ Extension not connected. Enable the extension, or run "node serve.js" in the terminal to serve the app locally and bypass CORS.', true, true);
+        } else {
+          toast('⚠️ Failed to connect to local 9Router. Ensure it is running at ' + (base || 'http://localhost:20128/v1'), true);
+        }
       } else {
-        toast('⚠️ Failed to connect to 9Router. Ensure it is running at ' + (base || 'http://localhost:20128/v1'), true);
+        toast('⚠️ Failed to connect to cloud 9Router. If this is a new deploy or has been idle, it may be cold-starting. Please wait...', true);
       }
     }
   }
@@ -1731,8 +1733,8 @@ function openSettings(){
 function closeSettings(){$('settingsModal').classList.add('hidden')}
 function onProviderChange(){
   const k=$('providerSel').value || settings.provider, p=PROVIDERS[k] || PROVIDERS.pollinations;
-  if(k==='ninerouter'&&!extensionConnected){
-    $('providerTip').innerHTML=p.tip+'<br><span style="color:var(--danger);font-weight:600">⚠️ Extension not connected. CORS will block 9Router. load the extension, OR run serve.js in your terminal (<code>node serve.js</code>) and open <code>http://localhost:3000</code>.</span>';
+  if(k==='ninerouter'&&isLocal9RouterEndpoint()&&!extensionConnected){
+    $('providerTip').innerHTML=p.tip+'<br><span style="color:var(--danger);font-weight:600">⚠️ Extension not connected. CORS will block local 9Router. Load the extension, OR run serve.js in your terminal (<code>node serve.js</code>) and open <code>http://localhost:3000</code>.</span>';
   } else {
     $('providerTip').textContent=p.tip;
   }
