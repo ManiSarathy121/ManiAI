@@ -3375,6 +3375,43 @@ const PPT_THEMES = {
   }
 };
 
+/* ── Smart subject-based theme detection ──
+   Scores every theme by keyword hits across a much wider subject net,
+   instead of stopping at the first tech/business match. Explicit
+   "theme: xyz" overrides in the text always win. */
+const PPT_THEME_KEYWORDS = {
+  academicLight: /\b(academic|education|educational|school|university|college|research|researcher|thesis|dissertation|lecture|curriculum|syllabus|learning|study|exam|examination|training\s+program|course|classroom|professor|student|science|scientific|philosophy|literature|history|historical|knowledge|library|scholar|scholarship|pedagogy|seminar)\b/g,
+  forestTech: /\b(code|coding|program|programming|developer|software|tech|technology|technical|api|database|sql|redis|security|cybersecurity|qa|engineer|engineering|devops|cloud|infrastructure|network|app|application|algorithm|architecture|system\s+design|debug|deployment|backend|frontend|health|healthcare|medical|medicine|wellness|fitness|nutrition|hospital|clinic|clinical|pharma|pharmaceutical|nursing|doctor|patient|therapy|environment|environmental|sustainability|sustainable|eco|ecology|green\s+energy|renewable|agriculture|farming|organic)\b/g,
+  oceanBreeze: /\b(sales|finance|financial|business|report|quarterly|growth|q[1-4]|marketing|revenue|client|customer|product|manager|management|corporate|strategy|strategic|investment|investor|banking|bank|economy|economic|economics|market|markets|startup\s+pitch|kpi|insurance|real\s+estate|logistics|supply\s+chain|retail|procurement|operations|budget|forecast)\b/g,
+  charcoalMinimal: /\b(legal|law|lawyer|attorney|litigation|compliance|policy|policies|governance|risk|audit|auditing|contract|regulation|regulatory|government|crisis|ethics|ethical|safety|incident|minimalist|formal|confidential|disciplinary|hr\s+policy|grievance)\b/g,
+  warmTerracotta: /\b(food|recipe|cooking|restaurant|culinary|cuisine|chef|menu|travel|tourism|tourist|hospitality|hotel|lifestyle|home|family|culture|cultural|craft|artisan|handmade|wedding|community|festival\s+food|farm-to-table|heritage)\b/g,
+  sunsetGlow: /\b(creative|creativity|design|designer|art|artistic|fashion|branding|brand|photography|photo|beauty|cosmetics|entertainment|media|music|musician|festival|event|events|celebration|party|social\s+media|influencer|content\s+creator|aesthetic)\b/g,
+  cyberpunkNeon: /\b(gaming|game|esports|futuristic|sci-fi|robotics|robot|artificial\s+intelligence|\bai\b|innovation|innovative|blockchain|crypto|cryptocurrency|metaverse|virtual\s+reality|\bvr\b|augmented\s+reality|\bar\b|hackathon|space\s+exploration|cyber|automation)\b/g
+};
+const PPT_THEME_EXPLICIT = {
+  'theme: academic light': 'academicLight', 'theme: light': 'academicLight', 'theme: academic': 'academicLight',
+  'theme: forest': 'forestTech', 'theme: green': 'forestTech', 'theme: tech': 'forestTech',
+  'theme: ocean': 'oceanBreeze', 'theme: blue': 'oceanBreeze', 'theme: business': 'oceanBreeze',
+  'theme: charcoal': 'charcoalMinimal', 'theme: minimal': 'charcoalMinimal',
+  'theme: terracotta': 'warmTerracotta', 'theme: warm': 'warmTerracotta',
+  'theme: sunset': 'sunsetGlow', 'theme: creative': 'sunsetGlow',
+  'theme: cyberpunk': 'cyberpunkNeon', 'theme: neon': 'cyberpunkNeon',
+  'theme: modern slate': 'modernSlate', 'theme: slate': 'modernSlate', 'theme: default': 'modernSlate'
+};
+function detectPPTTheme(tLow) {
+  tLow = tLow || '';
+  for (const phrase in PPT_THEME_EXPLICIT) {
+    if (tLow.includes(phrase)) return PPT_THEME_EXPLICIT[phrase];
+  }
+  let bestKey = null, bestScore = 0;
+  for (const key in PPT_THEME_KEYWORDS) {
+    const matches = tLow.match(PPT_THEME_KEYWORDS[key]);
+    const score = matches ? matches.length : 0;
+    if (score > bestScore) { bestScore = score; bestKey = key; }
+  }
+  return bestKey || 'modernSlate';
+}
+
 function buildSlides(raw, fallbackTitle) {
   const d = document.createElement('div');
   d.innerHTML = md(raw);
@@ -3444,18 +3481,7 @@ async function makePPTBlob(raw, title, themeKey) {
   pptx.layout = 'LAYOUT_16x9'; // 10.0 x 5.625 inches
   
   const tLow = ((title || '') + (raw || '')).toLowerCase();
-  let C = PPT_THEMES.modernSlate;
-  if (themeKey && PPT_THEMES[themeKey]) {
-    C = PPT_THEMES[themeKey];
-  } else {
-    if (tLow.includes('theme: academic light') || tLow.includes('theme: light')) C = PPT_THEMES.academicLight;
-    else if (tLow.includes('theme: forest') || tLow.includes('theme: green') || (/\b(?:code|program|developer|tech|software|architect|api|database|sql|redis|security|qa)\b/.test(tLow) && !tLow.includes('theme:'))) C = PPT_THEMES.forestTech;
-    else if (tLow.includes('theme: ocean') || tLow.includes('theme: blue') || (/\b(?:sales|finance|business|report|growth|q[1-4]|marketing|revenue|client|customer|product|manager)\b/.test(tLow) && !tLow.includes('theme:'))) C = PPT_THEMES.oceanBreeze;
-    else if (tLow.includes('theme: charcoal') || tLow.includes('theme: minimal')) C = PPT_THEMES.charcoalMinimal;
-    else if (tLow.includes('theme: terracotta') || tLow.includes('theme: warm')) C = PPT_THEMES.warmTerracotta;
-    else if (tLow.includes('theme: sunset')) C = PPT_THEMES.sunsetGlow;
-    else if (tLow.includes('theme: cyberpunk') || tLow.includes('theme: neon')) C = PPT_THEMES.cyberpunkNeon;
-  }
+  const C = (themeKey && PPT_THEMES[themeKey]) || PPT_THEMES[detectPPTTheme(tLow)];
 
   const F = 'Segoe UI';
   const slides = buildSlides(raw, title);
@@ -4167,14 +4193,7 @@ function openThemePicker(raw, title) {
   themePickerTitle = title || '';
   
   const tLow = ((title || '') + (raw || '')).toLowerCase();
-  if (tLow.includes('theme: academic light') || tLow.includes('theme: light')) selectedThemeKey = 'academicLight';
-  else if (tLow.includes('theme: forest') || tLow.includes('theme: green') || (/\b(?:code|program|developer|tech|software|architect|api|database|sql|redis|security|qa)\b/.test(tLow) && !tLow.includes('theme:'))) selectedThemeKey = 'forestTech';
-  else if (tLow.includes('theme: ocean') || tLow.includes('theme: blue') || (/\b(?:sales|finance|business|report|growth|q[1-4]|marketing|revenue|client|customer|product|manager)\b/.test(tLow) && !tLow.includes('theme:'))) selectedThemeKey = 'oceanBreeze';
-  else if (tLow.includes('theme: charcoal') || tLow.includes('theme: minimal')) selectedThemeKey = 'charcoalMinimal';
-  else if (tLow.includes('theme: terracotta') || tLow.includes('theme: warm')) selectedThemeKey = 'warmTerracotta';
-  else if (tLow.includes('theme: sunset')) selectedThemeKey = 'sunsetGlow';
-  else if (tLow.includes('theme: cyberpunk') || tLow.includes('theme: neon')) selectedThemeKey = 'cyberpunkNeon';
-  else selectedThemeKey = 'modernSlate';
+  selectedThemeKey = detectPPTTheme(tLow);
 
   $('themePickerModal').classList.remove('hidden');
   renderThemeOptions();
@@ -4275,18 +4294,7 @@ function renderSlidePreviewsInPanel(raw, themeKey) {
     });
   }
 
-  let key = themeKey;
-  if (!key) {
-    const tLow = (title + raw).toLowerCase();
-    if (tLow.includes('theme: academic light') || tLow.includes('theme: light')) key = 'academicLight';
-    else if (tLow.includes('theme: forest') || tLow.includes('theme: green') || (/\b(?:code|program|developer|tech|software|architect|api|database|sql|redis|security|qa)\b/.test(tLow) && !tLow.includes('theme:'))) key = 'forestTech';
-    else if (tLow.includes('theme: ocean') || tLow.includes('theme: blue') || (/\b(?:sales|finance|business|report|growth|q[1-4]|marketing|revenue|client|customer|product|manager)\b/.test(tLow) && !tLow.includes('theme:'))) key = 'oceanBreeze';
-    else if (tLow.includes('theme: charcoal') || tLow.includes('theme: minimal')) key = 'charcoalMinimal';
-    else if (tLow.includes('theme: terracotta') || tLow.includes('theme: warm')) key = 'warmTerracotta';
-    else if (tLow.includes('theme: sunset')) key = 'sunsetGlow';
-    else if (tLow.includes('theme: cyberpunk') || tLow.includes('theme: neon')) key = 'cyberpunkNeon';
-    else key = 'modernSlate';
-  }
+  let key = themeKey || detectPPTTheme((title + raw).toLowerCase());
   if (selector) selector.value = key;
   
   const C = PPT_THEMES[key];
