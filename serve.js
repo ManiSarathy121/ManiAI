@@ -4,7 +4,7 @@ const path = require('path');
 const { exec } = require('child_process');
 
 const PORT = process.env.PORT || 3000;
-const FILE_PATH = path.join(__dirname, 'Mani_AI_Chat.html');
+const FILE_PATH = path.join(__dirname, 'index.html');
 const USERDATA_DIR = path.join(__dirname, 'userdata');
 
 function ensureUserdataDir() {
