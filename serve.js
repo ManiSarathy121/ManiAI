@@ -4,7 +4,7 @@ const path = require('path');
 const { exec } = require('child_process');
 
 const PORT = process.env.PORT || 3000;
-const FILE_PATH = path.join(__dirname, 'index.html');
+const FILE_PATH = path.join(__dirname, 'Mani_AI_Chat.html');
 const USERDATA_DIR = path.join(__dirname, 'userdata');
 
 function ensureUserdataDir() {
@@ -87,6 +87,50 @@ const server = http.createServer((req, res) => {
         res.end('Proxy error: ' + err.message);
       });
       proxyReq.write(body);
+      proxyReq.end();
+    });
+    return;
+  }
+
+  // --- 9Router Cloud Proxy ---
+  if (pathname.startsWith('/api/ninerouter')) {
+    const targetPath = pathname.replace('/api/ninerouter', '');
+    const search = parsedUrl.search;
+    
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      const http = require('http');
+      const headers = { ...req.headers };
+      
+      // Remove headers that might interfere with proxying
+      delete headers.host;
+      delete headers.connection;
+      delete headers.referer;
+      delete headers.origin;
+      
+      const proxyReq = http.request({
+        hostname: '68.233.117.244',
+        port: 20128,
+        path: targetPath + search,
+        method: req.method,
+        headers: headers
+      }, (proxyRes) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Headers', '*');
+        res.setHeader('Access-Control-Allow-Methods', '*');
+        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        proxyRes.pipe(res);
+      });
+      
+      proxyReq.on('error', (err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Proxy error: ' + err.message }));
+      });
+      
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        proxyReq.write(body);
+      }
       proxyReq.end();
     });
     return;
