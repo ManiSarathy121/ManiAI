@@ -133,6 +133,9 @@ main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
 .actions button{font-size:11.5px;color:var(--faint);padding:4px 8px;border-radius:7px;display:flex;align-items:center;gap:4px;transition:all .12s}
 .actions button:hover{background:var(--surface);color:var(--text)}
 .messages .msg.assistant:not(:last-child) .regen{display:none}
+.actions button.continue-btn {color:var(--success);border:1px solid rgba(62,207,142,0.3);background:var(--success-dim)}
+.actions button.continue-btn:hover {background:rgba(62,207,142,0.25);border-color:var(--success);color:#fff}
+.messages .msg.assistant:not(:last-child) .continue-btn{display:none}
 
 /* File card */
 .file-card{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:12px 14px;margin:10px 0 4px;max-width:430px}
@@ -1091,14 +1094,41 @@ function addMessageEl(role,content,animate,files){
   }
   $('messages').appendChild(wrap);return wrap;
 }
+function isResponseTruncated(text) {
+  if (!text) return false;
+  const backtickCount = (text.match(/```/g) || []).length;
+  if (backtickCount % 2 !== 0) return true;
+  const lastLt = text.lastIndexOf('<');
+  const lastGt = text.lastIndexOf('>');
+  if (lastLt > lastGt) return true;
+  return false;
+}
+async function continueResponse(chat, el) {
+  if (generating) return;
+  const actions = el.querySelector('.actions');
+  if (actions) {
+    actions.innerHTML = '<span class="thinking"><i></i><i></i><i></i></span> Continuing…';
+  }
+  await generate(chat, el);
+}
 function attachActions(wrap,raw){
   const a=wrap.querySelector('.actions');if(!a)return;a.innerHTML='';
   const btns=[['⧉ Copy',()=>copyText(raw)],['⤓ Export',()=>openExportMenu(raw)]];
   if (hasSlidesContent(raw)) {
     btns.push(['👁️ Slides', () => showSlidesPreview(raw)]);
   }
+  if (isResponseTruncated(raw)) {
+    btns.push(['➡️ Continue', () => continueResponse(currentChat(), wrap)]);
+  }
   btns.push(['✏️ Correct',()=>send('Please review and correct any errors in your previous response.')],['📝 Summarize',()=>send('Please provide a concise summary of your previous response.')],['🔄 Rewrite',()=>send('Please rewrite your previous response in a clearer way.')],['🌐 Translate',()=>{const l=prompt('Translate to:','Tamil');if(l)send('Translate your previous response to '+l+'.')}],['↻ Regen',()=>regenerate()]);
-  btns.forEach(([label,fn])=>{const b=document.createElement('button');b.textContent=label;if(label.includes('Regen'))b.className='regen';b.onclick=fn;a.appendChild(b)});
+  btns.forEach(([label,fn])=>{
+    const b=document.createElement('button');
+    b.textContent=label;
+    if(label.includes('Regen'))b.className='regen';
+    else if(label.includes('Continue'))b.className='continue-btn';
+    b.onclick=fn;
+    a.appendChild(b);
+  });
 }
 function scrollBottom(force){const sc=$('scroller');if(force||sc.scrollHeight-sc.scrollTop-sc.clientHeight<140)sc.scrollTop=sc.scrollHeight}
 
@@ -1322,13 +1352,32 @@ async function executeBrowserTool(blockText) {
   } else throw new Error('Unknown browser action: ' + params.action);
 }
 
-async function generate(chat){
+async function generate(chat, continueEl = null){
   const p=PROVIDERS[settings.provider],model=settings.models[settings.provider]||p.fallback[0],key=p.needsKey?(settings.keys[p.keyName]||''):'';
-  if(p.needsKey&&!p.optionalKey&&!key){const el=addMessageEl('assistant','');el.querySelector('.content').innerHTML='<div class="error-box">API key needed. Open <b>Settings</b> to add one, or switch to <b>Pollinations</b> (no key).</div>';el.querySelector('.actions').innerHTML='';scrollBottom(true);return}
+  if(p.needsKey&&!p.optionalKey&&!key){
+    const el=continueEl || addMessageEl('assistant','');
+    el.querySelector('.content').innerHTML='<div class="error-box">API key needed. Open <b>Settings</b> to add one, or switch to <b>Pollinations</b> (no key).</div>';
+    el.querySelector('.actions').innerHTML='';
+    scrollBottom(true);
+    return;
+  }
   generating=true;setSendMode(true);abortCtrl=new AbortController();
-  const el=addMessageEl('assistant','');const contentEl=el.querySelector('.content');
-  contentEl.innerHTML='<span class="thinking"><i></i><i></i><i></i></span>';scrollBottom(true);
-  let full='',renderTimer=null;
+  let el, contentEl;
+  let full = '';
+  if (continueEl) {
+    el = continueEl;
+    contentEl = el.querySelector('.content');
+    const lastMsg = chat.messages[chat.messages.length - 1];
+    if (lastMsg && lastMsg.role === 'assistant') {
+      full = lastMsg.content;
+    }
+  } else {
+    el = addMessageEl('assistant','');
+    contentEl = el.querySelector('.content');
+    contentEl.innerHTML='<span class="thinking"><i></i><i></i><i></i></span>';
+  }
+  scrollBottom(true);
+  let renderTimer=null;
   const paint=fin=>{
     contentEl.innerHTML=md(full)+(fin?'':'<span class="cursor"></span>');
     enhanceCode(contentEl);
@@ -1392,14 +1441,27 @@ async function generate(chat){
       sysText+='\nIMPORTANT: The user wants a "'+fileIntent.ext+'" file named "'+fileIntent.name+'". Provide the full, complete code or content for this file inside a single code block matching the language if possible.';
     }
   }
-  const msgs=[{role:'system',content:sysText}].concat(chat.messages.map(m=>({role:m.role,content:m.content})));
+  let msgs=[{role:'system',content:sysText}].concat(chat.messages.map(m=>({role:m.role,content:m.content})));
+  if (continueEl) {
+    msgs.push({role: 'user', content: 'Continue generating the code block exactly from where you left off, without repeating the previous part.'});
+  }
   try{
     if(p.kind==='gemini')await streamGemini(key,model,msgs,onDelta,abortCtrl.signal);
     else if(p.kind==='anthropic')await streamAnthropic(key,model,msgs,onDelta,abortCtrl.signal);
     else await streamOpenAI(p,key,model,msgs,onDelta,abortCtrl.signal);
     if(renderTimer){clearTimeout(renderTimer);renderTimer=null}
     if(!full.trim())full='_(no response — try another model)_';
-    paint(true);chat.messages.push({role:'assistant',content:full});attachActions(el,full);persist();speakText(full);
+    paint(true);
+    if (continueEl) {
+      const lastMsg = chat.messages[chat.messages.length - 1];
+      if (lastMsg && lastMsg.role === 'assistant') lastMsg.content = full;
+    } else {
+      chat.messages.push({role:'assistant',content:full});
+    }
+    attachActions(el,full);persist();speakText(full);
+    if (!isResponseTruncated(full)) {
+      toast('✅ Generation Complete!');
+    }
     if(fileIntent)autoFileCardForIntent(el,full,fileIntent);
     if(hasSlidesContent(full) || (fileIntent && (fileIntent.ext==='pptx' || fileIntent.ext==='ppt'))){
       showSlidesPreview(full);
@@ -1456,7 +1518,23 @@ async function generate(chat){
     }
   }catch(err){
     if(renderTimer){clearTimeout(renderTimer);renderTimer=null}
-    if(err&&err.name==='AbortError'){if(full.trim()){paint(true);chat.messages.push({role:'assistant',content:full});attachActions(el,full);persist()}else{el.remove();if(!chat.messages.length)$('welcome').style.display=''}}
+    if(err&&err.name==='AbortError'){
+      if(full.trim()){
+        paint(true);
+        if (continueEl) {
+          const lastMsg = chat.messages[chat.messages.length - 1];
+          if (lastMsg && lastMsg.role === 'assistant') lastMsg.content = full;
+        } else {
+          chat.messages.push({role:'assistant',content:full});
+        }
+        attachActions(el,full);persist();
+      }else{
+        if (!continueEl) {
+          el.remove();
+          if(!chat.messages.length)$('welcome').style.display='';
+        }
+      }
+    }
     else{contentEl.innerHTML='<div class="error-box"><b>Error:</b> '+esc(((err&&err.message)||'Request failed').slice(0,400))+'</div>';el.querySelector('.actions').innerHTML=''}
   }finally{generating=false;abortCtrl=null;setSendMode(false);scrollBottom(false)}
 }
