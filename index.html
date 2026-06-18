@@ -5566,14 +5566,40 @@ async function initAuth() {
     }
   } catch(e) {}
 
-  if (!usersList.length) {
-    usersList = [
-      { username: 'admin', password: '56252a0a3600087c743134e3e1aeded7eefd544089323656793b55ad7c2d3546', role: 'admin' }, // Mani@2478
-      { username: 'dharani', password: '09579899e65b49320383a9162a1a7321ea9ad9e51d34e743db176b35a692d704', role: 'admin' }, // dharani@123
-      { username: 'vivek', password: '1a273df0612afcda2a1947874bde6f254c296c1eb3db1729c509b9e74305cd7a', role: 'admin' }, // vivek@123
-      { username: 'pavi', password: '89fa872f738bfb90aa8daea1c1984f8329fdaa05d3583df8300adc3c84c3173b', role: 'admin' }, // pavi@2026
-      { username: 'user', password: 'dcb694aa0322f143ed970e275c807bf123bd5db4f73140b94ccc757f42dc8043', role: 'user' } // user@123
-    ];
+  const defaultUsers = [
+    { username: 'admin', password: '56252a0a3600087c743134e3e1aeded7eefd544089323656793b55ad7c2d3546', role: 'admin' }, // 
+    { username: 'dharani', password: '09579899e65b49320383a9162a1a7321ea9ad9e51d34e743db176b35a692d704', role: 'admin' }, // 
+    { username: 'vivek', password: '1a273df0612afcda2a1947874bde6f254c296c1eb3db1729c509b9e74305cd7a', role: 'admin' }, // 
+    { username: 'pavi', password: '89fa872f738bfb90aa8daea1c1984f8329fdaa05d3583df8300adc3c84c3173b', role: 'admin' }, // 
+    { username: 'user', password: 'dcb694aa0322f143ed970e275c807bf123bd5db4f73140b94ccc757f42dc8043', role: 'user' } // 
+  ];
+
+  let listChanged = false;
+  for (const u of usersList) {
+    const name = u.username.toLowerCase();
+    if (name === 'admin' && (u.password === 'admin' || u.password === '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918')) {
+      u.password = '56252a0a3600087c743134e3e1aeded7eefd544089323656793b55ad7c2d3546'; // Mani@2478
+      delete u.changeRequired;
+      listChanged = true;
+    }
+    if (name === 'user' && (u.password === 'user' || u.password === '04f8996da763b7a969b1028ee3007569eaf3a635486ddab211d512c85b9df8fb')) {
+      u.password = 'dcb694aa0322f143ed970e275c807bf123bd5db4f73140b94ccc757f42dc8043'; // user@123
+      delete u.changeRequired;
+      listChanged = true;
+    }
+  }
+
+  for (const du of defaultUsers) {
+    if (!usersList.some(u => u.username.toLowerCase() === du.username.toLowerCase())) {
+      usersList.push(du);
+      listChanged = true;
+    }
+  }
+
+  if (listChanged || !usersList.length) {
+    if (!usersList.length) {
+      usersList = defaultUsers;
+    }
     localStorage.setItem('maniai_users', JSON.stringify(usersList));
     syncUsersListToServer();
   }
