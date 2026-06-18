@@ -551,14 +551,17 @@ main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
         <div style="flex:1"><label style="font-size:11px;color:var(--muted)">Repository</label><input type="text" id="githubRepo" placeholder="ManiAI"></div>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:8px">
-        <div style="flex:1"><label style="font-size:11px;color:var(--muted)">Filename</label><input type="text" id="githubFile" placeholder="index.html"></div>
+        <div style="flex:1"><label style="font-size:11px;color:var(--muted)">Filename</label><input type="text" id="githubFile" placeholder="data/{username}.json"></div>
         <div style="flex:1"><label style="font-size:11px;color:var(--muted)">Branch</label><input type="text" id="githubBranch" placeholder="main"></div>
       </div>
       <div>
         <label style="font-size:11px;color:var(--muted)">GitHub Personal Access Token (PAT)</label>
         <div class="input-group"><input type="password" id="githubToken" placeholder="ghp_..."><button onclick="toggleGithubTokenVis()">👁</button></div>
       </div>
-      <button class="secondary small" id="githubSyncBtn" onclick="syncWithGithub()" style="margin-top:10px;width:100%;display:flex;align-items:center;justify-content:center;gap:6px">☁️ Push Conversation History to GitHub</button>
+            <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="secondary small" id="githubSyncBtn" onclick="syncWithGithub()" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px">☁️ Push to GitHub</button>
+        <button class="secondary small" id="githubPullBtn" onclick="pullFromGithub()" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px">📥 Pull from GitHub</button>
+      </div>
     </div>
     <button class="primary" onclick="saveSettings()">💾 Save Settings</button>
   </div>
@@ -879,7 +882,7 @@ expression: TOTALYTD(SUM(Sales[Amount]), 'Calendar'[Date])
 /* ── State ── */
 let settings={provider:'pollinations',models:{pollinations:'openai',openrouter:'anthropic/claude-3.5-sonnet',anthropic:'claude-3-5-sonnet-20241022',gemini:'gemini-2.0-flash'},keys:{},bases:{},sys:DEFAULT_SYS,temp:0.7,showAllModels:true,thinkingMode:false,activeSkills:['codeGen','writing','dataAnalysis'],customSkills:[],memories:[],browserWsUrl:'ws://localhost:8765',pbiPort:null};
 let chats=[],currentId=null,generating=false,abortCtrl=null,attachedFiles=[],browserWs=null,pbiConnected=false;
-/*CHATS_BACKUP_START*/chats = [{"id":"mqj4xjqaoo10","title":"make 2 slide ppt for sales last month","created":1781765091874,"messages":[{"role":"user","content":"make 2 slide ppt for sales last month"},{"role":"assistant","content":"# Sales Performance - Last Month\n\n## Sales Results - Last Month [title]\n\n**Monthly Sales Review**  \n*Performance Overview & Key Metrics*\n\n---\n\n## Last Month's Performance [metric]\n\n**[+15%] Revenue Growth**  \nExceeded target by 15% month-over-month\n\n**[$2.4M] Total Sales**  \nStrong performance across all channels\n\n**[342] New Customers**  \nBest acquisition month this quarter\n\n**[94%] Customer Satisfaction**  \nMaintained high service quality\n\n**[23%] Digital Channel Growth**  \nOnline sales continue upward trend\n\n**[18] Top Performers**  \nRecognition for outstanding results"}]},{"id":"mqc6dwy4gowi","title":"i want to create a it asset store app in p","created":1781344271884,"messages":[{"role":"user","content":"i want to create a it asset store app in power apps using sharepoint and office 365 so admin can add the assets user wise user can login using the mail id and can see their asset information"}]},{"id":"mqc5652po198","title":"Write a DAX measure for YTD sales","created":1781342229553,"messages":[{"role":"user","content":"Write a DAX measure for YTD sales"}]}];/*CHATS_BACKUP_END*/
+/*CHATS_BACKUP_START*/chats=[];/*CHATS_BACKUP_END*/
 const backupChats = [...chats];
 
 async function loadUserData() {
@@ -1853,7 +1856,7 @@ function openSettings(){
     $('githubToken').value = localStorage.getItem('maniai_github_token') || '';
     $('githubUser').value = localStorage.getItem('maniai_github_user') || 'ManiSarathy121';
     $('githubRepo').value = localStorage.getItem('maniai_github_repo') || 'ManiAI';
-    $('githubFile').value = localStorage.getItem('maniai_github_file') || 'index.html';
+    $('githubFile').value = localStorage.getItem('maniai_github_file') || 'data/{username}.json';
     $('githubBranch').value = localStorage.getItem('maniai_github_branch') || 'main';
   }
   onProviderChange();$('settingsModal').classList.remove('hidden');
@@ -1901,7 +1904,7 @@ function saveSettings(){
     localStorage.setItem('maniai_github_token', $('githubToken').value.trim());
     localStorage.setItem('maniai_github_user', $('githubUser').value.trim() || 'ManiSarathy121');
     localStorage.setItem('maniai_github_repo', $('githubRepo').value.trim() || 'ManiAI');
-    localStorage.setItem('maniai_github_file', $('githubFile').value.trim() || 'index.html');
+    localStorage.setItem('maniai_github_file', $('githubFile').value.trim() || 'data/{username}.json');
     localStorage.setItem('maniai_github_branch', $('githubBranch').value.trim() || 'main');
   }
   persist();updatePill();closeSettings();
@@ -1912,8 +1915,16 @@ async function syncWithGithub() {
   const token = localStorage.getItem('maniai_github_token') || ($('githubToken') ? $('githubToken').value.trim() : '');
   const user = localStorage.getItem('maniai_github_user') || ($('githubUser') ? $('githubUser').value.trim() : '') || 'ManiSarathy121';
   const repo = localStorage.getItem('maniai_github_repo') || ($('githubRepo') ? $('githubRepo').value.trim() : '') || 'ManiAI';
-  const file = localStorage.getItem('maniai_github_file') || ($('githubFile') ? $('githubFile').value.trim() : '') || 'index.html';
+  let file = localStorage.getItem('maniai_github_file') || ($('githubFile') ? $('githubFile').value.trim() : '') || 'data/{username}.json';
   const branch = localStorage.getItem('maniai_github_branch') || ($('githubBranch') ? $('githubBranch').value.trim() : '') || 'main';
+
+  if (!currentUser) {
+    toast('You must be logged in to sync.', true);
+    return;
+  }
+  const username = currentUser.username.toLowerCase();
+  const userKey = username;
+  file = file.replace(/{username}/g, username).replace(/\[username\]/g, username);
 
   if (!token) {
     toast('GitHub Personal Access Token is required to sync.', true);
@@ -1928,37 +1939,64 @@ async function syncWithGithub() {
   }
 
   try {
-    toast('Fetching repository file...', false, true);
+    toast('Checking repository file...', false, true);
     const url = `https://api.github.com/repos/${user}/${repo}/contents/${file}?ref=${branch}`;
     const headers = {
       'Authorization': `token ${token}`,
       'Accept': 'application/vnd.github.v3+json'
     };
 
+    let currentSha = null;
+    let existingContent = '';
     const res = await fetch(url, { headers });
-    if (!res.ok) {
+    if (res.ok) {
+      const fileData = await res.json();
+      currentSha = fileData.sha;
+      const base64Content = fileData.content.replace(/\s/g, '');
+      existingContent = decodeURIComponent(escape(atob(base64Content)));
+    } else if (res.status !== 404) {
       throw new Error(`Failed to fetch file: ${res.statusText} (${res.status})`);
     }
 
-    const fileData = await res.json();
-    const currentSha = fileData.sha;
-    const base64Content = fileData.content.replace(/\s/g, '');
-    const fileContent = decodeURIComponent(escape(atob(base64Content)));
+    let newFileContent = '';
+    const isJson = file.toLowerCase().endsWith('.json');
 
-    const startMarker = '/*CHATS_BACKUP_START*/';
-    const endMarker = '/*CHATS_BACKUP_END*/';
-    const startIdx = fileContent.indexOf(startMarker);
-    const endIdx = fileContent.indexOf(endMarker);
+    if (isJson) {
+      const payload = {
+        username: currentUser.username,
+        settings: settings,
+        chats: chats
+      };
+      newFileContent = JSON.stringify(payload, null, 2);
+    } else {
+      if (!existingContent) {
+        throw new Error(`Target file ${file} does not exist in repository. For HTML backups, the file must exist.`);
+      }
+      const startMarker = '/*CHATS_BACKUP_START*/';
+      const endMarker = '/*CHATS_BACKUP_END*/';
+      const startIdx = existingContent.indexOf(startMarker);
+      const endIdx = existingContent.indexOf(endMarker);
 
-    if (startIdx === -1 || endIdx === -1) {
-      throw new Error('Could not find backup markers (/*CHATS_BACKUP_START*/ and /*CHATS_BACKUP_END*/) in the repository file.');
+      if (startIdx === -1 || endIdx === -1) {
+        throw new Error('Could not find backup markers (/*CHATS_BACKUP_START*/ and /*CHATS_BACKUP_END*/) in the repository file.');
+      }
+
+      const updatedChatsStr = `chats = ${JSON.stringify(chats)};`;
+      newFileContent = existingContent.substring(0, startIdx + startMarker.length) + updatedChatsStr + existingContent.substring(endIdx);
     }
 
-    const updatedChatsStr = `chats = ${JSON.stringify(chats)};`;
-    const newFileContent = fileContent.substring(0, startIdx + startMarker.length) + updatedChatsStr + fileContent.substring(endIdx);
     const newBase64Content = btoa(unescape(encodeURIComponent(newFileContent)));
 
     toast('Pushing update to GitHub...', false, true);
+    const putBody = {
+      message: `Sync conversation history backup - ${currentUser.username}`,
+      content: newBase64Content,
+      branch: branch
+    };
+    if (currentSha) {
+      putBody.sha = currentSha;
+    }
+
     const putRes = await fetch(`https://api.github.com/repos/${user}/${repo}/contents/${file}`, {
       method: 'PUT',
       headers: {
@@ -1966,12 +2004,7 @@ async function syncWithGithub() {
         'Content-Type': 'application/json',
         'Accept': 'application/vnd.github.v3+json'
       },
-      body: JSON.stringify({
-        message: 'Sync conversation history backup',
-        content: newBase64Content,
-        sha: currentSha,
-        branch: branch
-      })
+      body: JSON.stringify(putBody)
     });
 
     if (!putRes.ok) {
@@ -1987,6 +2020,102 @@ async function syncWithGithub() {
     if (syncBtn) {
       syncBtn.disabled = false;
       syncBtn.textContent = originalText;
+    }
+  }
+}
+
+async function pullFromGithub() {
+  const token = localStorage.getItem('maniai_github_token') || ($('githubToken') ? $('githubToken').value.trim() : '');
+  const user = localStorage.getItem('maniai_github_user') || ($('githubUser') ? $('githubUser').value.trim() : '') || 'ManiSarathy121';
+  const repo = localStorage.getItem('maniai_github_repo') || ($('githubRepo') ? $('githubRepo').value.trim() : '') || 'ManiAI';
+  let file = localStorage.getItem('maniai_github_file') || ($('githubFile') ? $('githubFile').value.trim() : '') || 'data/{username}.json';
+  const branch = localStorage.getItem('maniai_github_branch') || ($('githubBranch') ? $('githubBranch').value.trim() : '') || 'main';
+
+  if (!currentUser) {
+    toast('You must be logged in to pull.', true);
+    return;
+  }
+  const username = currentUser.username.toLowerCase();
+  const userKey = username;
+  file = file.replace(/{username}/g, username).replace(/\[username\]/g, username);
+
+  if (!token) {
+    toast('GitHub Personal Access Token is required to pull.', true);
+    return;
+  }
+
+  const pullBtn = $('githubPullBtn');
+  const originalText = pullBtn ? pullBtn.textContent : '';
+  if (pullBtn) {
+    pullBtn.disabled = true;
+    pullBtn.textContent = 'Pulling...';
+  }
+
+  try {
+    toast('Fetching backup from GitHub...', false, true);
+    const url = `https://api.github.com/repos/${user}/${repo}/contents/${file}?ref=${branch}`;
+    const headers = {
+      'Authorization': `token ${token}`,
+      'Accept': 'application/vnd.github.v3+json'
+    };
+
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      if (res.status === 404) {
+        throw new Error(`Backup file '${file}' not found in the repository.`);
+      }
+      throw new Error(`Failed to fetch file: ${res.statusText} (${res.status})`);
+    }
+
+    const fileData = await res.json();
+    const base64Content = fileData.content.replace(/\s/g, '');
+    const fileContent = decodeURIComponent(escape(atob(base64Content)));
+
+    const isJson = file.toLowerCase().endsWith('.json');
+    if (isJson) {
+      const payload = JSON.parse(fileContent);
+      if (payload.chats) {
+        chats = payload.chats;
+      }
+      if (payload.settings) {
+        settings = Object.assign(settings, payload.settings);
+      }
+    } else {
+      const startMarker = '/*CHATS_BACKUP_START*/';
+      const endMarker = '/*CHATS_BACKUP_END*/';
+      const startIdx = fileContent.indexOf(startMarker);
+      const endIdx = fileContent.indexOf(endMarker);
+
+      if (startIdx === -1 || endIdx === -1) {
+        throw new Error('Could not find backup markers in the HTML file.');
+      }
+      const codeBlock = fileContent.substring(startIdx + startMarker.length, endIdx).trim();
+      const jsonStr = codeBlock.replace(/^chats\s*=\s*/, '').replace(/;$/, '');
+      const parsedChats = JSON.parse(jsonStr);
+      if (Array.isArray(parsedChats)) {
+        chats = parsedChats;
+      } else {
+        throw new Error('Failed to parse chats from HTML backup.');
+      }
+    }
+
+    store.set('maniai_settings_' + userKey, JSON.stringify(settings));
+    store.set('maniai_chats_' + userKey, JSON.stringify(chats));
+    syncUserDataToServer(userKey);
+
+    renderChatList();
+    updatePill();
+    updateSkillsBadge();
+    greet();
+
+    toast('Successfully restored settings and chat history from GitHub!');
+  } catch (err) {
+    console.error(err);
+    toast(`GitHub Pull Failed: ${err.message}`, true);
+  } finally {
+    if (pullBtn) {
+      pullBtn.disabled = false;
+      pullBtn.textContent = originalText;
     }
   }
 }
