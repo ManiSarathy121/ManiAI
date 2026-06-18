@@ -543,6 +543,23 @@ main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
     <div class="field" id="keyRow"><label>API key</label><div class="input-group"><input type="password" id="keyInput" placeholder="Paste your key" autocomplete="off"><button onclick="toggleKeyVis()">👁</button></div><div class="tip" id="keyTip"></div></div>
     <div class="field"><label>System prompt</label><textarea id="sysPrompt" placeholder="How should the assistant behave?"></textarea></div>
     <div class="field"><label>Creativity (temperature) <span id="tempVal">0.7</span></label><input type="range" id="tempRange" min="0" max="2" step="0.1" value="0.7" oninput="$('tempVal').textContent=this.value"></div>
+        <div class="field" style="border-top:1px solid var(--border-soft);padding-top:12px;margin-top:12px">
+      <label>GitHub Sync (for backup history)</label>
+      <div class="tip" style="margin-bottom:8px">Sync and push your conversation history directly to your repository.</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <div style="flex:1"><label style="font-size:11px;color:var(--muted)">Username</label><input type="text" id="githubUser" placeholder="ManiSarathy121"></div>
+        <div style="flex:1"><label style="font-size:11px;color:var(--muted)">Repository</label><input type="text" id="githubRepo" placeholder="ManiAI"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <div style="flex:1"><label style="font-size:11px;color:var(--muted)">Filename</label><input type="text" id="githubFile" placeholder="index.html"></div>
+        <div style="flex:1"><label style="font-size:11px;color:var(--muted)">Branch</label><input type="text" id="githubBranch" placeholder="main"></div>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--muted)">GitHub Personal Access Token (PAT)</label>
+        <div class="input-group"><input type="password" id="githubToken" placeholder="ghp_..."><button onclick="toggleGithubTokenVis()">👁</button></div>
+      </div>
+      <button class="secondary small" id="githubSyncBtn" onclick="syncWithGithub()" style="margin-top:10px;width:100%;display:flex;align-items:center;justify-content:center;gap:6px">☁️ Push Conversation History to GitHub</button>
+    </div>
     <button class="primary" onclick="saveSettings()">💾 Save Settings</button>
   </div>
 </div>
@@ -862,6 +879,8 @@ expression: TOTALYTD(SUM(Sales[Amount]), 'Calendar'[Date])
 /* ── State ── */
 let settings={provider:'pollinations',models:{pollinations:'openai',openrouter:'anthropic/claude-3.5-sonnet',anthropic:'claude-3-5-sonnet-20241022',gemini:'gemini-2.0-flash'},keys:{},bases:{},sys:DEFAULT_SYS,temp:0.7,showAllModels:true,thinkingMode:false,activeSkills:['codeGen','writing','dataAnalysis'],customSkills:[],memories:[],browserWsUrl:'ws://localhost:8765',pbiPort:null};
 let chats=[],currentId=null,generating=false,abortCtrl=null,attachedFiles=[],browserWs=null,pbiConnected=false;
+/*CHATS_BACKUP_START*/chats=[];/*CHATS_BACKUP_END*/
+const backupChats = [...chats];
 
 async function loadUserData() {
   if (!currentUser) return;
@@ -1435,6 +1454,13 @@ async function generate(chat, continueEl = null){
     const docTypeMap = { pdf:'pdf', doc:'word', docx:'word', xls:'excel', xlsx:'excel', ppt:'ppt', pptx:'ppt' };
     const docType = docTypeMap[fileIntent.ext];
     if(docType && DOC_GUIDE[docType]) sysText+=DOC_GUIDE[docType];
+    if (docType === 'ppt') {
+      const lastUserMsg = chat.messages[chat.messages.length - 1]?.content || '';
+      const requestedSlideCount = extractRequestedSlideCount(lastUserMsg);
+      if (requestedSlideCount) {
+        sysText += `\n\nCRITICAL SLIDE COUNT COMPLIANCE: The user has requested EXACTLY ${requestedSlideCount} slides. You MUST generate EXACTLY ${requestedSlideCount} slides (including the title slide). Each slide is defined by a "## Slide Title [layout]" markdown heading. Do NOT output more or fewer than exactly ${requestedSlideCount} slide headings under any circumstances. Adjust the level of detail so it fits exactly within this slide count.`;
+      }
+    }
     if(fileIntent.ext==='zip'){
       sysText+='\nIMPORTANT: The user wants the response packaged as a ZIP file named "'+fileIntent.name+'". Write all necessary code/text files inside distinct, complete markdown code blocks so they can be parsed and packed into the ZIP.';
     }else if(!docType){
@@ -1823,6 +1849,13 @@ function openSettings(){
 
   providerSel.innerHTML=Object.keys(PROVIDERS).map(k=>'<option value="'+k+'"'+(k===settings.provider?' selected':'')+'>'+esc(PROVIDERS[k].label)+'</option>').join('');
   $('sysPrompt').value=settings.sys;$('tempRange').value=settings.temp;$('tempVal').textContent=settings.temp;
+    if ($('githubToken')) {
+    $('githubToken').value = localStorage.getItem('maniai_github_token') || '';
+    $('githubUser').value = localStorage.getItem('maniai_github_user') || 'ManiSarathy121';
+    $('githubRepo').value = localStorage.getItem('maniai_github_repo') || 'ManiAI';
+    $('githubFile').value = localStorage.getItem('maniai_github_file') || 'index.html';
+    $('githubBranch').value = localStorage.getItem('maniai_github_branch') || 'main';
+  }
   onProviderChange();$('settingsModal').classList.remove('hidden');
 }
 function closeSettings(){$('settingsModal').classList.add('hidden')}
@@ -1864,9 +1897,99 @@ function saveSettings(){
     if(p.customBase){if(!settings.bases)settings.bases={};settings.bases[k]=normalizeBase($('baseInput').value)||p.defaultBase}
     settings.sys=$('sysPrompt').value.trim()||DEFAULT_SYS;settings.temp=Number($('tempRange').value);
   }
+    if ($('githubToken')) {
+    localStorage.setItem('maniai_github_token', $('githubToken').value.trim());
+    localStorage.setItem('maniai_github_user', $('githubUser').value.trim() || 'ManiSarathy121');
+    localStorage.setItem('maniai_github_repo', $('githubRepo').value.trim() || 'ManiAI');
+    localStorage.setItem('maniai_github_file', $('githubFile').value.trim() || 'index.html');
+    localStorage.setItem('maniai_github_branch', $('githubBranch').value.trim() || 'main');
+  }
   persist();updatePill();closeSettings();
 }
 function toggleKeyVis(){const inp=$('keyInput');inp.type=inp.type==='password'?'text':'password'}
+function toggleGithubTokenVis(){const inp=$('githubToken');inp.type=inp.type==='password'?'text':'password'}
+async function syncWithGithub() {
+  const token = localStorage.getItem('maniai_github_token') || ($('githubToken') ? $('githubToken').value.trim() : '');
+  const user = localStorage.getItem('maniai_github_user') || ($('githubUser') ? $('githubUser').value.trim() : '') || 'ManiSarathy121';
+  const repo = localStorage.getItem('maniai_github_repo') || ($('githubRepo') ? $('githubRepo').value.trim() : '') || 'ManiAI';
+  const file = localStorage.getItem('maniai_github_file') || ($('githubFile') ? $('githubFile').value.trim() : '') || 'index.html';
+  const branch = localStorage.getItem('maniai_github_branch') || ($('githubBranch') ? $('githubBranch').value.trim() : '') || 'main';
+
+  if (!token) {
+    toast('GitHub Personal Access Token is required to sync.', true);
+    return;
+  }
+
+  const syncBtn = $('githubSyncBtn');
+  const originalText = syncBtn ? syncBtn.textContent : '';
+  if (syncBtn) {
+    syncBtn.disabled = true;
+    syncBtn.textContent = 'Syncing...';
+  }
+
+  try {
+    toast('Fetching repository file...', false, true);
+    const url = `https://api.github.com/repos/${user}/${repo}/contents/${file}?ref=${branch}`;
+    const headers = {
+      'Authorization': `token ${token}`,
+      'Accept': 'application/vnd.github.v3+json'
+    };
+
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch file: ${res.statusText} (${res.status})`);
+    }
+
+    const fileData = await res.json();
+    const currentSha = fileData.sha;
+    const base64Content = fileData.content.replace(/\s/g, '');
+    const fileContent = decodeURIComponent(escape(atob(base64Content)));
+
+    const startMarker = '/*CHATS_BACKUP_START*/';
+    const endMarker = '/*CHATS_BACKUP_END*/';
+    const startIdx = fileContent.indexOf(startMarker);
+    const endIdx = fileContent.indexOf(endMarker);
+
+    if (startIdx === -1 || endIdx === -1) {
+      throw new Error('Could not find backup markers (/*CHATS_BACKUP_START*/ and /*CHATS_BACKUP_END*/) in the repository file.');
+    }
+
+    const updatedChatsStr = `chats = ${JSON.stringify(chats)};`;
+    const newFileContent = fileContent.substring(0, startIdx + startMarker.length) + updatedChatsStr + fileContent.substring(endIdx);
+    const newBase64Content = btoa(unescape(encodeURIComponent(newFileContent)));
+
+    toast('Pushing update to GitHub...', false, true);
+    const putRes = await fetch(`https://api.github.com/repos/${user}/${repo}/contents/${file}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `token ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/vnd.github.v3+json'
+      },
+      body: JSON.stringify({
+        message: 'Sync conversation history backup',
+        content: newBase64Content,
+        sha: currentSha,
+        branch: branch
+      })
+    });
+
+    if (!putRes.ok) {
+      const errPayload = await putRes.json().catch(() => ({}));
+      throw new Error(errPayload.message || `Failed to update file: ${putRes.statusText}`);
+    }
+
+    toast('Successfully backed up conversation history to GitHub!');
+  } catch (err) {
+    console.error(err);
+    toast(`GitHub Sync Failed: ${err.message}`, true);
+  } finally {
+    if (syncBtn) {
+      syncBtn.disabled = false;
+      syncBtn.textContent = originalText;
+    }
+  }
+}
 function updatePill(){const p=PROVIDERS[settings.provider];const model=settings.models[settings.provider]||p.fallback[0];const name=p.short||(settings.provider.charAt(0).toUpperCase()+settings.provider.slice(1));$('pillText').textContent=name+' · '+model;$('footModel').textContent='· '+name+' / '+model}
 
 /* ── Image Generation ── */
@@ -3198,6 +3321,39 @@ async function saveEditedPdf(){
 
 /* ── Document Export ── */
 const DOC_GUIDE={pdf:'\nIMPORTANT: User wants a PDF. Write COMPLETE content in Markdown.',word:'\nIMPORTANT: Write COMPLETE content in Markdown for the Word doc.',excel:'\nIMPORTANT: User wants Excel. Present ALL data as Markdown tables.',ppt:'\nIMPORTANT: User wants PowerPoint. Structure output in slides using "## Slide Title [layout]".\n- LAYOUT TYPES: For each slide, choose the best layout type based on content, and append it in brackets to the slide heading:\n  * `[title]`: Presentation cover slide (only Slide 1).\n  * `[divider]`: Major section break or transition slide.\n  * `[hero]`: Single high-impact point, definition, or primary idea.\n  * `[2-col]` or `[3-col]`: Side-by-side list cards.\n  * `[metric]`: KPI scorecards and dashboards. Use `[Value] Description` (e.g., `[98%] Score`).\n  * `[comparison]`: Pros vs. cons or old vs. new panels.\n  * `[timeline]`: Phase steps chronologically. Use bullet points.\n  * `[quote]`: A notable client quote or testimonial. Use markdown blockquotes (`> "Text" - Author`).\n  * `[code]`: Technical code block terminal.\n- STRICT SLIDE COUNT: If the user requests a specific slide count (e.g., "3 slides"), write exactly that number of slide headings (including title slide), no more and no less.\n- Telegraphic content: Use short keyword phrases and bold labels. Avoid paragraphs and verbose text. Limit content to 6 bullet items per slide.'};
+function extractRequestedSlideCount(text) {
+  if (!text) return null;
+  const match = text.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+slides?\b/i);
+  if (match) {
+    const wordMap = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+    const val = match[1].toLowerCase();
+    if (wordMap[val] !== undefined) return wordMap[val];
+    const num = parseInt(val);
+    if (!isNaN(num)) return num;
+  }
+  return null;
+}
+function detectPPTTheme(text, title) {
+  const tLow = ((title || '') + ' ' + (text || '')).toLowerCase();
+  if (tLow.includes('theme: academic light') || tLow.includes('theme: academic')) return 'academicLight';
+  if (tLow.includes('theme: forest') || tLow.includes('theme: emerald')) return 'forestTech';
+  if (tLow.includes('theme: ocean') || tLow.includes('theme: corporate')) return 'oceanBreeze';
+  if (tLow.includes('theme: charcoal') || tLow.includes('theme: minimal')) return 'charcoalMinimal';
+  if (tLow.includes('theme: terracotta') || tLow.includes('theme: warm')) return 'warmTerracotta';
+  if (tLow.includes('theme: sunset') || tLow.includes('theme: glow')) return 'sunsetGlow';
+  if (tLow.includes('theme: cyberpunk') || tLow.includes('theme: neon')) return 'cyberpunkNeon';
+  if (tLow.includes('theme: modern slate') || tLow.includes('theme: slate')) return 'modernSlate';
+
+  if (/\b(?:ai|artificial intelligence|machine learning|deep learning|neural|nlp|robot|automation|future|space|galaxy|cosmos|quantum|cyber)\b/.test(tLow)) return 'modernSlate';
+  if (/\b(?:code|program|developer|tech|software|architect|api|database|sql|redis|security|qa|git|github|linux|docker|cloud|aws|azure|server|network)\b/.test(tLow)) return 'cyberpunkNeon';
+  if (/\b(?:business|finance|sales|marketing|revenue|growth|corporate|investment|stock|quarterly|q[1-4]|report|analytics|kpi|management|client|partner|consulting|strategy)\b/.test(tLow)) return 'oceanBreeze';
+  if (/\b(?:nature|environment|sustainability|green|ecology|agriculture|plants|botany|biology|eco|renewable|clean energy|solar|wind|organic|forest)\b/.test(tLow)) return 'forestTech';
+  if (/\b(?:minimal|minimalism|clean|simple|portfolio|art|design|gallery|architecture|photography|exhibition|concept)\b/.test(tLow)) return 'charcoalMinimal';
+  if (/\b(?:warm|terracotta|clay|cozy|food|recipe|restaurant|cook|history|heritage|travel|culture|museum|literature|craft|autumn|vintage)\b/.test(tLow)) return 'warmTerracotta';
+  if (/\b(?:music|party|fashion|lifestyle|youth|sunset|festival|cinema|theatre|show|concert|entertainment|night|club|glow)\b/.test(tLow)) return 'sunsetGlow';
+  if (/\b(?:academic|study|university|thesis|paper|school|teaching|education|science|research|professor|lesson|classroom|math|physics|chemistry|biology)\b/.test(tLow)) return 'academicLight';
+  return 'modernSlate';
+}
 function detectFileIntent(t){
   if(!t)return null;
   const tLow=t.toLowerCase();
@@ -3432,9 +3588,53 @@ function buildSlides(raw, fallbackTitle) {
     }
   });
   if (!slides.length) start(fallbackTitle);
-  if (slides.length > 0 && slides[0].layout === 'default') {
-    slides[0].layout = 'title';
-  }
+  
+  // Post-processing: Auto-detect smart infographic layouts based on slide content
+  slides.forEach((sd, idx) => {
+    if (idx === 0) {
+      sd.layout = 'title';
+      return;
+    }
+    if (sd.layout !== 'default') return;
+
+    const tLow = sd.title.toLowerCase();
+    const itemsText = sd.items.map(it => it.text).join(' ').toLowerCase();
+
+    if (sd.codes && sd.codes.length > 0) {
+      sd.layout = 'code';
+      return;
+    }
+    if (sd.items.length === 1 && (sd.items[0].italic || sd.items[0].text.startsWith('"') || sd.items[0].text.startsWith('“'))) {
+      sd.layout = 'quote';
+      return;
+    }
+    if (/\b(vs|versus|comparison|compare|pros\b|cons\b|advantages|disadvantages)\b/.test(tLow + ' ' + itemsText)) {
+      sd.layout = 'comparison';
+      return;
+    }
+    if (/\[\d+%\]|\[\$\d+.*?\]|\[\d+.*?\]/.test(itemsText) || (sd.items.length <= 4 && (itemsText.match(/\d+%/g) || []).length >= 2)) {
+      sd.layout = 'metric';
+      return;
+    }
+    if (/\b(timeline|process|steps|phases|milestones|roadmap)\b/.test(tLow + ' ' + itemsText) || 
+        (sd.items.length >= 3 && sd.items.every(it => /^(step|phase|mile|year|\d{4})\b/i.test(it.text)))) {
+      sd.layout = 'timeline';
+      return;
+    }
+
+    if (sd.items.length === 2) {
+      sd.layout = '2-col';
+    } else if (sd.items.length === 3 || sd.items.length === 6) {
+      sd.layout = '3-col';
+    } else if (sd.items.length === 4) {
+      sd.layout = '2-col';
+    } else if (sd.items.length === 1) {
+      sd.layout = 'hero';
+    } else {
+      sd.layout = '2-col';
+    }
+  });
+
   return slides;
 }
 
@@ -3443,18 +3643,11 @@ async function makePPTBlob(raw, title, themeKey) {
   const pptx = new window.PptxGenJS();
   pptx.layout = 'LAYOUT_16x9'; // 10.0 x 5.625 inches
   
-  const tLow = ((title || '') + (raw || '')).toLowerCase();
   let C = PPT_THEMES.modernSlate;
   if (themeKey && PPT_THEMES[themeKey]) {
     C = PPT_THEMES[themeKey];
   } else {
-    if (tLow.includes('theme: academic light') || tLow.includes('theme: light')) C = PPT_THEMES.academicLight;
-    else if (tLow.includes('theme: forest') || tLow.includes('theme: green') || (/\b(?:code|program|developer|tech|software|architect|api|database|sql|redis|security|qa)\b/.test(tLow) && !tLow.includes('theme:'))) C = PPT_THEMES.forestTech;
-    else if (tLow.includes('theme: ocean') || tLow.includes('theme: blue') || (/\b(?:sales|finance|business|report|growth|q[1-4]|marketing|revenue|client|customer|product|manager)\b/.test(tLow) && !tLow.includes('theme:'))) C = PPT_THEMES.oceanBreeze;
-    else if (tLow.includes('theme: charcoal') || tLow.includes('theme: minimal')) C = PPT_THEMES.charcoalMinimal;
-    else if (tLow.includes('theme: terracotta') || tLow.includes('theme: warm')) C = PPT_THEMES.warmTerracotta;
-    else if (tLow.includes('theme: sunset')) C = PPT_THEMES.sunsetGlow;
-    else if (tLow.includes('theme: cyberpunk') || tLow.includes('theme: neon')) C = PPT_THEMES.cyberpunkNeon;
+    C = PPT_THEMES[detectPPTTheme(raw, title)];
   }
 
   const F = 'Segoe UI';
@@ -3863,7 +4056,7 @@ async function makePPTBlob(raw, title, themeKey) {
 
       if (colCount === 1) {
         const card = cards[0];
-        const cardX = 0.6, cardY = 1.2, cardW = 5.2, cardH = 3.8;
+        const cardX = 0.6, cardY = 1.2, cardW = 8.8, cardH = 3.8;
         
         s.addShape(pptx.ShapeType.roundRect, {
           x: cardX, y: cardY, w: cardW, h: cardH,
@@ -3887,13 +4080,13 @@ async function makePPTBlob(raw, title, themeKey) {
             rectRadius: 0.05
           });
           s.addText(metric, {
-            x: cardX + 0.3, y: cardY + 0.25, w: 1.2, h: 0.7,
+            x: cardX + 0.3, y: cardY + 0.25, w: 1.5, h: 0.7,
             fontSize: 26, bold: true, color: C.accentGlow,
             fontFace: F, align: 'center', valign: 'middle'
           });
-          s.addShape(pptx.ShapeType.rect, { x: cardX + 1.6, y: cardY + 0.3, w: 0.02, h: 0.6, fill: { color: C.border } });
+          s.addShape(pptx.ShapeType.rect, { x: cardX + 1.9, y: cardY + 0.3, w: 0.02, h: 0.6, fill: { color: C.border } });
           s.addText(desc, {
-            x: cardX + 1.8, y: cardY + 0.25, w: cardW - 2.2, h: 0.7,
+            x: cardX + 2.1, y: cardY + 0.25, w: cardW - 2.5, h: 0.7,
             fontSize: 13, bold: true, color: C.white,
             fontFace: F, align: 'left', valign: 'middle'
           });
@@ -3904,7 +4097,7 @@ async function makePPTBlob(raw, title, themeKey) {
             fontSize: 15, bold: true, color: C.accentGlow,
             fontFace: F, align: 'left', valign: 'top'
           });
-          s.addShape(pptx.ShapeType.rect, { x: cardX + 0.3, y: cardY + 0.65, w: cardW - 0.6, h: 0.015, fill: { color: C.border } });
+          s.addShape(pptx.ShapeType.rect, { x: cardX + 0.3, y: cardY + 0.65, w: 1.5, h: 0.015, fill: { color: C.border } });
           bulletY = cardY + 0.8;
         }
 
@@ -3922,22 +4115,6 @@ async function makePPTBlob(raw, title, themeKey) {
           }));
           s.addText(runs, { x: cardX + 0.3, y: bulletY, w: cardW - 0.6, h: cardH - (bulletY - cardY) - 0.2, align: 'left', valign: 'top' });
         }
-
-        // Right Quick Take
-        const qX = 6.0, qY = 1.2, qW = 3.4, qH = 3.8;
-        s.addShape(pptx.ShapeType.roundRect, {
-          x: qX, y: qY, w: qW, h: qH,
-          fill: { color: C.accentDim },
-          line: { color: C.accent, width: 1.5 },
-          rectRadius: 0.08
-        });
-        s.addShape(pptx.ShapeType.rect, { x: qX, y: qY, w: qW, h: 0.08, fill: { color: C.accent } });
-        s.addText('★ KEY TAKEAWAY', { x: qX + 0.3, y: qY + 0.25, w: qW - 0.6, h: 0.3, fontSize: 10, bold: true, color: C.accentGlow, fontFace: F });
-        s.addShape(pptx.ShapeType.rect, { x: qX + 0.3, y: qY + 0.55, w: 0.8, h: 0.02, fill: { color: C.accent } });
-        s.addText('This section outlines core specifications and metric trends. Take action on key performance indexes (KPIs) to drive growth and eliminate system bottlenecks.', {
-          x: qX + 0.3, y: qY + 0.75, w: qW - 0.6, h: 2.8,
-          fontSize: 11, color: C.text, italic: true, fontFace: F, align: 'left', valign: 'top'
-        });
       }
       else if (colCount >= 2 && colCount <= 4) {
         const gap = 0.25;
@@ -4277,15 +4454,7 @@ function renderSlidePreviewsInPanel(raw, themeKey) {
 
   let key = themeKey;
   if (!key) {
-    const tLow = (title + raw).toLowerCase();
-    if (tLow.includes('theme: academic light') || tLow.includes('theme: light')) key = 'academicLight';
-    else if (tLow.includes('theme: forest') || tLow.includes('theme: green') || (/\b(?:code|program|developer|tech|software|architect|api|database|sql|redis|security|qa)\b/.test(tLow) && !tLow.includes('theme:'))) key = 'forestTech';
-    else if (tLow.includes('theme: ocean') || tLow.includes('theme: blue') || (/\b(?:sales|finance|business|report|growth|q[1-4]|marketing|revenue|client|customer|product|manager)\b/.test(tLow) && !tLow.includes('theme:'))) key = 'oceanBreeze';
-    else if (tLow.includes('theme: charcoal') || tLow.includes('theme: minimal')) key = 'charcoalMinimal';
-    else if (tLow.includes('theme: terracotta') || tLow.includes('theme: warm')) key = 'warmTerracotta';
-    else if (tLow.includes('theme: sunset')) key = 'sunsetGlow';
-    else if (tLow.includes('theme: cyberpunk') || tLow.includes('theme: neon')) key = 'cyberpunkNeon';
-    else key = 'modernSlate';
+    key = detectPPTTheme(raw, title);
   }
   if (selector) selector.value = key;
   
@@ -4752,7 +4921,6 @@ function renderSlidePreviewsInPanel(raw, themeKey) {
         const cWrap = document.createElement('div');
         cWrap.style.cssText = `
           display: flex;
-          gap: 3%;
           flex: 1;
           min-height: 0;
         `;
@@ -4761,7 +4929,7 @@ function renderSlidePreviewsInPanel(raw, themeKey) {
         const card = cards[0];
         const leftEl = document.createElement('div');
         leftEl.style.cssText = `
-          flex: 1.6;
+          flex: 1;
           background: #${C.panel};
           border: 1px solid #${C.border};
           border-top: 3px solid #${C.accent};
@@ -4805,25 +4973,6 @@ function renderSlidePreviewsInPanel(raw, themeKey) {
           ${bulletsHtml}
         `;
         cWrap.appendChild(leftEl);
-
-        const rightEl = document.createElement('div');
-        rightEl.style.cssText = `
-          flex: 1;
-          background: #${C.accentDim};
-          border: 1px solid #${C.accent};
-          border-top: 3px solid #${C.accent};
-          border-radius: 6px;
-          padding: 4% 5%;
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        `;
-        rightEl.innerHTML = `
-          <div style="font-size: 8px; font-weight: 700; color: #${C.accentGlow};">★ KEY TAKEAWAY</div>
-          <div style="width: 25%; height: 1px; background: #${C.accent};"></div>
-          <p style="font-size: 8px; color: #${C.text}; font-style: italic; line-height: 1.35; margin: 0;">This section outlines core specifications and metric trends. Take action on key performance indexes (KPIs) to drive growth.</p>
-        `;
-        cWrap.appendChild(rightEl);
       }
       else {
         const cWrap = document.createElement('div');
@@ -5358,6 +5507,20 @@ async function runExportForIntent(raw,intent){
 function toggleSidebar(f){const sb=$('sidebar'),ov=$('overlay');const open=typeof f==='boolean'?f:!sb.classList.contains('open');sb.classList.toggle('open',open);ov.classList.toggle('show',open)}
 const input=$('input');function autosize(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,190)+'px'}
 input.addEventListener('input',autosize);input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&window.innerWidth>768){e.preventDefault();onSend()}});
+input.addEventListener('paste',async e=>{
+  const items=(e.clipboardData||e.originalEvent.clipboardData).items;
+  const files=[];
+  for(const item of items){
+    if(item.kind==='file'){
+      const file=item.getAsFile();
+      if(file)files.push(file);
+    }
+  }
+  if(files.length>0){
+    e.preventDefault();
+    await handleFiles(files);
+  }
+});
 function greet(){const h=new Date().getHours();$('greeting').textContent=h<5?'Burning midnight oil?':h<12?'Good morning.':h<17?'Good afternoon.':'Good evening.'}
 // Drag & drop
 const scroller=$('scroller');scroller.addEventListener('dragover',e=>{e.preventDefault();scroller.classList.add('drag-over')});scroller.addEventListener('dragleave',()=>scroller.classList.remove('drag-over'));scroller.addEventListener('drop',e=>{e.preventDefault();scroller.classList.remove('drag-over');handleFiles(e.dataTransfer.files)});
@@ -5367,16 +5530,18 @@ let currentUser = null;
 let usersList = [];
 let tempAuthUser = null;
 
+async function hashPassword(passwd) {
+  const msgBuffer = new TextEncoder().encode(passwd);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function initAuth() {
   try {
     const stored = localStorage.getItem('maniai_users');
     if (stored) {
       usersList = JSON.parse(stored);
-      const adminUser = usersList.find(u => u.username.toLowerCase() === 'admin');
-      if (adminUser && adminUser.password === 'admin' && adminUser.changeRequired === undefined) {
-        adminUser.changeRequired = true;
-        localStorage.setItem('maniai_users', JSON.stringify(usersList));
-      }
     }
   } catch (e) {
     console.error('Failed to init users list:', e);
@@ -5389,7 +5554,8 @@ async function initAuth() {
       if (data && data.success && data.users) {
         const localAdmin = usersList.find(u => u.username.toLowerCase() === 'admin');
         const serverAdmin = data.users.find(u => u.username.toLowerCase() === 'admin');
-        if (localAdmin && serverAdmin && localAdmin.password !== 'admin' && serverAdmin.password === 'admin') {
+        const defaultAdminHash = '56252a0a3600087c743134e3e1aeded7eefd544089323656793b55ad7c2d3546';
+        if (localAdmin && serverAdmin && localAdmin.password !== defaultAdminHash && (serverAdmin.password === 'admin' || serverAdmin.password === defaultAdminHash)) {
           console.warn("Server reset to default admin password. Restoring custom local password.");
           syncUsersListToServer();
         } else {
@@ -5402,9 +5568,25 @@ async function initAuth() {
 
   if (!usersList.length) {
     usersList = [
-      { username: 'admin', password: 'admin', role: 'admin', changeRequired: true },
-      { username: 'user', password: 'user', role: 'user' }
+      { username: 'admin', password: '56252a0a3600087c743134e3e1aeded7eefd544089323656793b55ad7c2d3546', role: 'admin' }, // Mani@2478
+      { username: 'dharani', password: '09579899e65b49320383a9162a1a7321ea9ad9e51d34e743db176b35a692d704', role: 'admin' }, // dharani@123
+      { username: 'vivek', password: '1a273df0612afcda2a1947874bde6f254c296c1eb3db1729c509b9e74305cd7a', role: 'admin' }, // vivek@123
+      { username: 'pavi', password: '89fa872f738bfb90aa8daea1c1984f8329fdaa05d3583df8300adc3c84c3173b', role: 'admin' }, // pavi@2026
+      { username: 'user', password: 'dcb694aa0322f143ed970e275c807bf123bd5db4f73140b94ccc757f42dc8043', role: 'user' } // user@123
     ];
+    localStorage.setItem('maniai_users', JSON.stringify(usersList));
+    syncUsersListToServer();
+  }
+
+  // Self-healing legacy password migration
+  let migrated = false;
+  for (const u of usersList) {
+    if (u.password && (u.password.length !== 64 || !/^[a-fA-F0-9]+$/.test(u.password))) {
+      u.password = await hashPassword(u.password);
+      migrated = true;
+    }
+  }
+  if (migrated) {
     localStorage.setItem('maniai_users', JSON.stringify(usersList));
     syncUsersListToServer();
   }
@@ -5413,6 +5595,11 @@ async function initAuth() {
     const session = sessionStorage.getItem('maniai_session');
     if (session) {
       currentUser = JSON.parse(session);
+      const match = usersList.find(u => u.username.toLowerCase() === currentUser.username.toLowerCase());
+      if (match) {
+        currentUser = match;
+        sessionStorage.setItem('maniai_session', JSON.stringify(currentUser));
+      }
     }
   } catch (e) {
     console.error('Failed to load session:', e);
@@ -5461,7 +5648,7 @@ function checkAuth() {
   }
 }
 
-function login() {
+async function login() {
   const username = $('loginUser').value.trim();
   const password = $('loginPass').value.trim();
   const errDiv = $('loginError');
@@ -5472,7 +5659,8 @@ function login() {
     return;
   }
 
-  const user = usersList.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === password);
+  const hashedPassword = await hashPassword(password);
+  const user = usersList.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === hashedPassword);
   if (user) {
     if (user.changeRequired) {
       tempAuthUser = user;
@@ -5508,7 +5696,7 @@ function login() {
   }
 }
 
-function updateFirstLoginPassword() {
+async function updateFirstLoginPassword() {
   const newPass = $('newPass').value;
   const confirmPass = $('confirmPass').value;
   const errDiv = $('loginError');
@@ -5525,8 +5713,17 @@ function updateFirstLoginPassword() {
     return;
   }
 
-  if (newPass === 'admin') {
-    errDiv.textContent = 'Password cannot be the default "admin".';
+  const hashedPassword = await hashPassword(newPass);
+  const defaultHashes = [
+    '56252a0a3600087c743134e3e1aeded7eefd544089323656793b55ad7c2d3546', // Mani@2478
+    '09579899e65b49320383a9162a1a7321ea9ad9e51d34e743db176b35a692d704', // dharani@123
+    '1a273df0612afcda2a1947874bde6f254c296c1eb3db1729c509b9e74305cd7a', // vivek@123
+    '89fa872f738bfb90aa8daea1c1984f8329fdaa05d3583df8300adc3c84c3173b', // pavi@2026
+    'dcb694aa0322f143ed970e275c807bf123bd5db4f73140b94ccc757f42dc8043'  // user@123
+  ];
+
+  if (newPass === 'admin' || defaultHashes.includes(hashedPassword)) {
+    errDiv.textContent = 'Password cannot be a default password.';
     errDiv.style.display = 'block';
     return;
   }
@@ -5545,7 +5742,7 @@ function updateFirstLoginPassword() {
 
   const userIndex = usersList.findIndex(u => u.username.toLowerCase() === tempAuthUser.username.toLowerCase());
   if (userIndex !== -1) {
-    usersList[userIndex].password = newPass;
+    usersList[userIndex].password = hashedPassword;
     delete usersList[userIndex].changeRequired;
     localStorage.setItem('maniai_users', JSON.stringify(usersList));
     syncUsersListToServer();
@@ -5645,7 +5842,7 @@ function renderUserList() {
   }).join('');
 }
 
-function createUser() {
+async function createUser() {
   const username = $('newUsername').value.trim();
   const password = $('newUserPassword').value.trim();
   const role = $('newUserRole').value;
@@ -5660,7 +5857,8 @@ function createUser() {
     return;
   }
   
-  usersList.push({ username, password, role });
+  const hashedPassword = await hashPassword(password);
+  usersList.push({ username, password: hashedPassword, role });
   localStorage.setItem('maniai_users', JSON.stringify(usersList));
   syncUsersListToServer();
   
