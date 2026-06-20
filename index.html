@@ -1410,35 +1410,56 @@ async function generate(chat, continueEl = null){
       const block = extractStreamingCodeBlock(full);
       if (block) {
         const panel = $('htmlPreview');
+        const isHTML = block.lang === 'html' && (block.code.includes('<html') || block.code.includes('<!DOCTYPE html>'));
+
         if (panel.classList.contains('hidden') || !panel.classList.contains('open')) {
           panel.classList.remove('hidden');
           void panel.offsetWidth;
           panel.classList.add('open');
-          switchPreviewTab('code');
+          // Fresh open: reset live-preview state so a new generation starts clean
+          panel._liveTabSet = false;
+          panel._lastLiveRender = 0;
+          panel._lastLiveLen = 0;
+          // For HTML, land directly on the rendered preview tab; code otherwise
+          switchPreviewTab(isHTML ? 'preview' : 'code');
         }
-        
-        const isHTML = block.lang === 'html' && (block.code.includes('<html') || block.code.includes('<!DOCTYPE html>'));
-        
+
         // Update tabs visibility
         const prevTabPreview = $('prevTabPreview');
         if (prevTabPreview) {
           prevTabPreview.style.display = isHTML ? '' : 'none';
         }
-        
-        // Update Title & Editor
+
+        // Update Title & Editor (editor stays in sync live)
         const titleText = isHTML ? 'Live Preview' : `${block.lang.toUpperCase()} Code`;
         $('previewPaneTitle').innerHTML = (isHTML ? '🖥️ ' : '💻 ') + esc(titleText);
-        
+
         $('htmlCodeEditor').value = block.code;
         panel.dataset.html = block.code;
-        
+
         if (isHTML) {
           if (fin) {
+            // Final, fully-formed render
             $('htmlPreviewFrame').srcdoc = injectErrorCatcher(block.code);
             switchPreviewTab('preview');
             const titleMatch = block.code.match(/<title>(.*?)<\/title>/i);
             const appTitle = titleMatch ? titleMatch[1] : 'Live Preview';
             $('previewPaneTitle').innerHTML = '🖥️ ' + esc(appTitle);
+            panel._lastLiveRender = 0;
+            panel._lastLiveLen = 0;
+          } else {
+            // LIVE preview while the model is still writing.
+            // Keep the user on the Preview tab and refresh the iframe on a
+            // throttle so the page visibly builds itself on the right side.
+            if (!panel._liveTabSet) { switchPreviewTab('preview'); panel._liveTabSet = true; }
+            const now = Date.now();
+            const grew = block.code.length - (panel._lastLiveLen || 0);
+            if (!panel._lastLiveRender || ((now - panel._lastLiveRender) > 400 && grew > 40)) {
+              panel._lastLiveRender = now;
+              panel._lastLiveLen = block.code.length;
+              // Seal unterminated script/style so partial HTML still renders
+              $('htmlPreviewFrame').srcdoc = injectErrorCatcher(sealForLivePreview(block.code));
+            }
           }
         } else {
           switchPreviewTab('code');
@@ -2679,6 +2700,19 @@ function extractStreamingCodeBlock(t) {
   }
   return lastBlock;
 }
+function sealForLivePreview(code){
+  // While streaming, the HTML is incomplete. An unclosed <script> or <style>
+  // swallows everything after it and the preview goes blank. Temporarily seal
+  // those tags so the partially-written page still renders on the right.
+  let c = code;
+  const so = (c.match(/<script\b[^>]*>/gi) || []).length;
+  const sc = (c.match(/<\/script\s*>/gi) || []).length;
+  if (so > sc) c += '\n<\/script>';
+  const yo = (c.match(/<style\b[^>]*>/gi) || []).length;
+  const yc = (c.match(/<\/style\s*>/gi) || []).length;
+  if (yo > yc) c += '\n<\/style>';
+  return c;
+}
 function injectErrorCatcher(html){
   const errorScript = `<script>
     window.onerror = function(message, source, lineno, colno, error) {
@@ -3449,7 +3483,38 @@ async function saveEditedPdf(){
 }
 
 /* ── Document Export ── */
-const DOC_GUIDE={pdf:'\nIMPORTANT: User wants a PDF. Write COMPLETE content in Markdown.',word:'\nIMPORTANT: Write COMPLETE content in Markdown for the Word doc.',excel:'\nIMPORTANT: User wants Excel. Present ALL data as Markdown tables.',ppt:'\nIMPORTANT: User wants PowerPoint. Structure output in slides using "## Slide Title [layout]".\n- LAYOUT TYPES: For each slide, choose the best layout type based on content, and append it in brackets to the slide heading:\n  * `[title]`: Presentation cover slide (only Slide 1).\n  * `[divider]`: Major section break or transition slide.\n  * `[hero]`: Single high-impact point, definition, or primary idea.\n  * `[2-col]` or `[3-col]`: Side-by-side list cards.\n  * `[metric]`: KPI scorecards and dashboards. Use `[Value] Description` (e.g., `[98%] Score`).\n  * `[comparison]`: Pros vs. cons or old vs. new panels.\n  * `[timeline]`: Phase steps chronologically. Use bullet points.\n  * `[quote]`: A notable client quote or testimonial. Use markdown blockquotes (`> "Text" - Author`).\n  * `[code]`: Technical code block terminal.\n- STRICT SLIDE COUNT: If the user requests a specific slide count (e.g., "3 slides"), write exactly that number of slide headings (including title slide), no more and no less.\n- Telegraphic content: Use short keyword phrases and bold labels. Avoid paragraphs and verbose text. Limit content to 6 bullet items per slide.'};
+const DOC_GUIDE={pdf:'\nIMPORTANT: User wants a PDF. Write COMPLETE content in Markdown.',word:'\nIMPORTANT: Write COMPLETE content in Markdown for the Word doc.',excel:'\nIMPORTANT: User wants Excel. Present ALL data as Markdown tables.',ppt:`
+IMPORTANT: The user wants a PowerPoint deck. Do NOT write an essay or a chat reply — design a *presentation*. Think like a senior presentation designer building an executive-grade deck. Each slide must earn its place.
+
+OUTPUT FORMAT — one slide per "## Title [layout]" heading:
+Append a layout tag in brackets to every slide title. Pick the layout from the slide's MEANING, not at random:
+  * [title]    Cover slide. ONLY slide 1. Deck title + a one-line subtitle (a normal paragraph line under it).
+  * [divider]  Section break that introduces the next group of slides. Few words.
+  * [hero]     One single high-impact idea, definition, or thesis. One short card.
+  * [2-col]    Two related groups / two themes side by side.
+  * [3-col]    Three parallel items, pillars, or categories.
+  * [metric]   Numbers, KPIs, results. Write each as "[VALUE] Label" e.g. "[40%] Revenue growth", "[2.3x] Faster". 2-4 metrics.
+  * [comparison] Two opposing sides: before/after, old/new, pros/cons, A vs B. First bullet group = left, second = right.
+  * [timeline] An ordered sequence: phases, steps, milestones, a roadmap. 3-5 stages in order.
+  * [quote]    A testimonial or notable statement. Use a blockquote: > "Quote text" - Author.
+  * [code]     A technical/code slide. Put the snippet in a fenced code block.
+
+NARRATIVE — structure the whole deck as a story, not a pile of headings:
+  1. Cover  2. The hook / why it matters  3. Context or problem  4. Core points (1 idea per slide)  5. Evidence / data ([metric] or [comparison])  6. Implications or recommendation  7. Closing takeaway / call to action.
+
+WRITING RULES (this is what makes it look professional, like Claude's decks):
+  - The TITLE states the takeaway, not a generic label. "Revenue grew 40% in Q3" - NOT "Revenue". "Why migrations fail" - NOT "Problems".
+  - ONE core idea per slide. If a slide has two ideas, split it.
+  - Bullets are telegraphic but SUBSTANTIVE: tight, information-rich phrases - never full paragraphs, never empty filler.
+  - Lead bullets with a bold label: "**Speed** - 3x faster cold starts". 3-5 bullets per slide is ideal; 6 is the hard max.
+  - Never put the user's raw request, instructions, or words like "create a presentation about" into any title or bullet.
+  - Convert any list of numbers into a [metric] slide. Convert any A-versus-B into [comparison]. Convert any sequence into [timeline].
+  - Add a short [divider] before each major section of a longer deck.
+
+LENGTH:
+  - If the user names a slide count (e.g. "5 slides"), produce EXACTLY that many "## " headings including the cover - no more, no less; adjust depth to fit.
+  - If no count is given, default to a tight 8-12 slide deck with a cover and a closing slide.
+`};
 function extractRequestedSlideCount(text) {
   if (!text) return null;
   const match = text.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+slides?\b/i);
